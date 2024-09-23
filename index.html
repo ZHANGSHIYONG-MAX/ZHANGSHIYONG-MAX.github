@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>标记点保存到 LocalStorage</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <style>
+	h1 {
+            font-family: 'Times New Roman', Times, serif;
+            font-size: 32px;
+            color: #333;
+            text-align: center; /* 标题居中 */
+        }
+        #map {
+            width: 100%;
+            height: 1000px;
+        }
+
+        .tooltip-name {
+            color: red;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .tooltip-note {
+            color: green;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h1>张国维课题组学术地图</h1>
+    <div id="map"></div>
+
+    <script>
+        var map = L.map('map').setView([39.9042, 116.4074], 12);  // 北京坐标
+
+        // 加载OpenStreetMap图层
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            minZoom: 3
+        }).addTo(map);
+
+        // 保存到本地 LocalStorage 的键
+        const localStorageKey = 'mapMarkers';
+
+        // 加载本地存储中的标记
+        function loadMarkers() {
+            const savedMarkers = JSON.parse(localStorage.getItem(localStorageKey)) || [];
+            savedMarkers.forEach(marker => {
+                addMarkerWithTooltip(marker.lat, marker.lon, marker.name, marker.note);
+            });
+        }
+
+        // 保存标记到 LocalStorage
+        function saveMarkerToLocalStorage(lat, lon, name, note) {
+            const savedMarkers = JSON.parse(localStorage.getItem(localStorageKey)) || [];
+            savedMarkers.push({ lat, lon, name, note });
+            localStorage.setItem(localStorageKey, JSON.stringify(savedMarkers));
+        }
+
+        // 删除标记并更新 LocalStorage
+        function deleteMarkerFromLocalStorage(lat, lon) {
+            let savedMarkers = JSON.parse(localStorage.getItem(localStorageKey)) || [];
+            savedMarkers = savedMarkers.filter(marker => marker.lat !== lat || marker.lon !== lon);
+            localStorage.setItem(localStorageKey, JSON.stringify(savedMarkers));
+        }
+
+        // 添加标记并显示 Tooltip
+        function addMarkerWithTooltip(lat, lon, name, note) {
+            var marker = L.marker([lat, lon]).addTo(map);
+
+            var tooltipContent = `<div>
+                                    <span class="tooltip-name">${name}</span><br>
+                                    <span class="tooltip-note">${note}</span>
+                                  </div>`;
+            
+            marker.bindTooltip(tooltipContent, { 
+                permanent: true,   
+                direction: 'top'   
+            });
+
+            // 左键点击修改笔记
+            marker.on('click', function() {
+                var newNote = prompt("请输入或修改笔记：", note);
+                if (newNote !== null) {
+                    note = newNote;
+                    marker.setTooltipContent(`<div>
+                                                <span class="tooltip-name">${name}</span><br>
+                                                <span class="tooltip-note">${note}</span>
+                                              </div>`);
+                    saveMarkerToLocalStorage(lat, lon, name, newNote);
+                }
+            });
+
+            // 右键点击删除标记
+            marker.on('contextmenu', function() {
+                if (confirm("确定删除该标记？")) {
+                    map.removeLayer(marker);
+                    deleteMarkerFromLocalStorage(lat, lon);
+                }
+            });
+        }
+
+        // 右键点击地图事件，用于创建新标记
+        map.on('contextmenu', function(e) {
+            var lat = e.latlng.lat;
+            var lon = e.latlng.lng;
+            var name = prompt("请输入标记名称：", "新标记");
+            if (name !== null) {
+                var note = prompt("请输入与该标记相关的笔记：", "这是笔记");
+                if (note !== null) {
+                    addMarkerWithTooltip(lat, lon, name, note);
+                    saveMarkerToLocalStorage(lat, lon, name, note);
+                }
+            }
+        });
+
+        // 页面加载时加载标记
+        loadMarkers();
+    </script>
+</body>
+</html>
