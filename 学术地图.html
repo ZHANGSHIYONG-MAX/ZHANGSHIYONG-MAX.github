@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学术地图</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        h1 {
+            font-family: 'Times New Roman', Times, serif;
+            font-size: 32px;
+            color: #333;
+            text-align: center;
+        }
+        #map {
+            width: 100%;
+            height: 1000px;
+        }
+        #pause-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 10px 20px;
+            background-color: #f44336;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #pause-btn.paused {
+            background-color: #4CAF50;  /* 改变按钮颜色 */
+        }
+        .tooltip-name-box {
+            background-color: #f9f9f9;
+            border: 1px solid #ccc;
+            padding: 5px;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: red;
+            text-align: center;
+        }
+        .tooltip-note-box {
+            background-color: #fffbe7;
+            border: 1px solid #ccc;
+            padding: 5px;
+            color: green;
+            white-space: pre-line;
+            word-wrap: break-word;
+            max-width: 1000px;
+            min-width: 200px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+        }
+        #note-input {
+            display: none;
+            position: absolute;
+            top: 10px;
+            left: 50px;
+            z-index: 1000;
+            background-color: white;
+            padding: 10px;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <h1>学术地图</h1>
+    <div id="map"></div>
+    <button id="pause-btn" onclick="togglePause()">暂停</button>
+
+    <!-- 临时笔记输入框 -->
+    <div id="note-input">
+        <textarea id="note-textarea" rows="4" cols="50" placeholder="请输入笔记，支持换行"></textarea><br>
+        <button onclick="saveNote()">保存笔记</button>
+        <button onclick="cancelNote()">取消</button>
+        <button onclick="deleteMarker()">删除标记</button>
+    </div>
+
+    <script>
+        var map = L.map('map').setView([39.9042, 116.4074], 3);  // 设置北京为地图中心
+        var markers = [];
+        var currentMarker = null;
+        var editingNoteIndex = null; 
+
+        // 加载OpenStreetMap图层
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            minZoom: 2,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd'
+        }).addTo(map);
+
+        // 从 localStorage 加载保存的标记和笔记
+       function loadMarkers() {
+            var savedMarkers = localStorage.getItem('markers');
+            if (savedMarkers) {
+                var parsedMarkers = JSON.parse(savedMarkers);
+                parsedMarkers.forEach(function(markerData) {
+                    addMarkerWithNotes(markerData.lat, markerData.lon, markerData.name, markerData.notes);
+                });
+            }
+        }
+
+        // 保存标记到 localStorage
+        function saveMarkers() {
+            var markersData = markers.map(function(marker) {
+                return {
+                    lat: marker.getLatLng().lat,
+                    lon: marker.getLatLng().lng,
+                    name: marker.name,
+                    notes: marker.notes
+                };
+            });
+            localStorage.setItem('markers', JSON.stringify(markersData));
+        }
+
+        // 添加标记并包含笔记功能
+        function addMarkerWithNotes(lat, lon, name, notes) {
+            var marker = L.marker([lat, lon]).addTo(map);
+            marker.name = name;
+            marker.notes = notes || [];
+
+            marker.updateTooltip = function() {
+                var notesHtml = marker.notes.map(function(note, index) {
+                    return `<div class="tooltip-note-box">
+                                <span onclick="editNote(${index})">${note}</span>
+                                <button onclick="deleteNote(${index})">删除</button>
+                            </div>`;
+                }).join('');
+                var tooltipContent = `<div class="tooltip-name-box">${name}</div>${notesHtml}`;
+                marker.bindTooltip(tooltipContent, {
+                    permanent: true,
+                    direction: 'top',
+                    interactive: true
+                });
+            };
+
+            marker.updateTooltip();
+
+            marker.on('click', function() {
+                currentMarker = marker;
+                editingNoteIndex = null; 
+                document.getElementById('note-textarea').value = "";
+                document.getElementById('note-input').style.display = 'block';
+            });
+
+            marker.on('contextmenu', function() {
+                if (confirm("确定删除该标记？")) {
+                    map.removeLayer(marker);
+                    markers = markers.filter(m => m !== marker);
+                    saveMarkers();
+                }
+            });
+
+            markers.push(marker);
+            saveMarkers();
+        }
+
+        // 保存笔记
+        function saveNote() {
+            var newNote = document.getElementById('note-textarea').value;
+            if (currentMarker) {
+                if (editingNoteIndex !== null) {
+                    currentMarker.notes[editingNoteIndex] = newNote;
+                } else {
+                    currentMarker.notes.push(newNote);
+                }
+                document.getElementById('note-input').style.display = 'none';
+                currentMarker.updateTooltip();
+                saveMarkers();
+                currentMarker = null;
+                editingNoteIndex = null;
+            }
+        }
+
+        // 取消编辑
+        function cancelNote() {
+            document.getElementById('note-input').style.display = 'none';
+            currentMarker = null;
+            editingNoteIndex = null;
+        }
+
+        // 编辑笔记
+        function editNote(index) {
+            if (currentMarker) {
+                editingNoteIndex = index;
+                document.getElementById('note-textarea').value = currentMarker.notes[index];
+                document.getElementById('note-input').style.display = 'block';
+            }
+        }
+
+        // 删除笔记
+        function deleteNote(index) {
+            if (currentMarker) {
+                currentMarker.notes.splice(index, 1);
+                currentMarker.updateTooltip();
+                saveMarkers();
+            }
+        }
+
+        // 右键点击地图创建新标记
+        map.on('contextmenu', function(e) {
+            var lat = e.latlng.lat;
+            var lon = e.latlng.lng;
+            var name = prompt("请输入标记名称：", "新标记");
+            if (name !== null) {
+                addMarkerWithNotes(lat, lon, name, []);
+            }
+        });
+
+        // 地图自动平移相关逻辑
+        var direction = 'right';  
+        var distance = 16;
+        var interval = 1;  
+       	var panInterval; 
+        var isPaused = false;
+	var initialPosition = [39.9042, 116.4074];
+	var leftBoundary = 100;
+	var rightBoundary =550;
+	function startPanning() {
+    // 每次开始平移时，将地图重置到初始位置并重置方向为初始方向
+    	map.setView(initialPosition, 3);  // 重置地图到初始位置，5为缩放等级
+
+    // 启动自动平移
+   	 panInterval = setInterval(function() {
+        	var currentCenter = map.getCenter();  // 获取地图中心的经纬度
+        	var currentLongitude = currentCenter.lng;  // 获取当前经度
+
+        // 检查当前经度是否超出左右边界
+        	if (currentLongitude >= rightBoundary) {
+            		direction = 'left';  // 超出右边界，改变方向为向左移动
+      		 } else if (currentLongitude <= leftBoundary) {
+            		direction = 'right';  // 超出左边界，改变方向为向右移动
+       		 }
+
+        // 根据方向移动地图
+       		 if (direction === 'right') {
+          		  map.panBy([distance, 0]);
+      		  } else if (direction === 'left') {
+           		 map.panBy([-distance, 0]);
+   	   	  }
+    }, interval);
+}
+        function stopPanning() {
+            clearInterval(panInterval);
+        }
+
+        function toggleDirection() {
+            if (direction === 'right') {
+                direction = 'left';
+            } else {
+                direction = 'right';
+            }
+        }
+
+        function togglePause() {
+            var pauseButton = document.getElementById('pause-btn');
+            if (isPaused) {
+		direction = 'right'; 
+                startPanning();
+                pauseButton.textContent = '暂停';
+                pauseButton.classList.remove('paused');
+            } else {
+                stopPanning();
+                pauseButton.textContent = '继续';
+                pauseButton.classList.add('paused');
+            }
+            isPaused = !isPaused;
+        }
+
+        function startAutoDirectionChange() {
+            setInterval(function() {
+                toggleDirection();
+            }, moveDuration);
+        }
+
+        // 初始化自动平移和加载标记
+	loadMarkers();
+        startPanning();
+        startAutoDirectionChange();  
+    </script>
+</body>
+</html>
